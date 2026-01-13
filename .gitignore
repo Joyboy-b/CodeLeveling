@@ -1,82 +1,116 @@
-# This file is used to ignore files which are generated
-# ----------------------------------------------------------------------------
-
+# ============================================================
+# General temporary / backup files
+# ============================================================
 *~
 *.autosave
-*.a
-*.core
-*.moc
-*.o
-*.obj
 *.orig
 *.rej
-*.so
-*.so.*
-*_pch.h.cpp
-*_resource.rc
-*.qm
 .#*
 *.*#
 core
 !core/
 tags
+
+# OS junk
 .DS_Store
 .directory
-*.debug
-Makefile*
-*.prl
-*.app
+Thumbs.db
+
+# ============================================================
+# Qt generated files
+# ============================================================
+*.moc
 moc_*.cpp
 ui_*.h
 qrc_*.cpp
-Thumbs.db
-*.res
-*.rc
+*.qm
+*.prl
+*.app
+
 /.qmake.cache
 /.qmake.stash
 
-# qtcreator generated files
+# Qt Creator user-specific files
 *.pro.user*
 *.qbs.user*
 CMakeLists.txt.user*
 
-# xemacs temporary files
-*.flc
+# ============================================================
+# CMake / build outputs
+# ============================================================
+build/
+build-*/
+build_*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
 
-# Vim temporary files
-.*.swp
+# ============================================================
+# Object / binary files
+# ============================================================
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dll
+*.exe
+*.debug
 
-# Visual Studio generated files
-*.ib_pdb_index
+# ============================================================
+# Compiler / IDE temp files
+# ============================================================
+*.pch
+*.pdb
 *.idb
 *.ilk
-*.pdb
+
+# ============================================================
+# Visual Studio (in case project is opened there)
+# ============================================================
 *.sln
 *.suo
 *.vcproj
-*vcproj.*.*.user
+*.vcxproj
+*.vcxproj.*
 *.ncb
 *.sdf
 *.opensdf
-*.vcxproj
-*vcxproj.*
+*.ib_pdb_index
 
-# MinGW generated files
+# ============================================================
+# MinGW
+# ============================================================
 *.Debug
 *.Release
 
-# Python byte code
+# ============================================================
+# Vim / Emacs temp files
+# ============================================================
+.*.swp
+*.flc
+
+# ============================================================
+# Python bytecode (safety)
+# ============================================================
 *.pyc
+__pycache__/
 
-# Binaries
-# --------
-*.dll
-*.exe
+# ============================================================
+# SQLite databases (IMPORTANT for CodeLeveling)
+# ============================================================
+*.sqlite
+*.sqlite3
+*.db
 
-# Directories with generated files
-.moc/
-.obj/
-.pch/
-.rcc/
-.uic/
-/build*/
+# ============================================================
+# VS Code settings
+# ============================================================
+.vscode/
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
