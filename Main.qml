@@ -16,6 +16,51 @@ ApplicationWindow {
             Label { text: "Level: " + App.level }
             Item { Layout.fillWidth: true }
             Button { text: "Refresh"; onClicked: App.refresh() }
+            Button { text: "Dailies"; onClicked: nav.push(dailyPage) }
+            Button { text: "Leaderboard"; onClicked: nav.push(leaderboardPage) }
+            ComboBox {
+                id: userBox
+                model: App.users
+                Layout.preferredWidth: 180
+
+                // set current selection whenever model or currentUser changes
+                Component.onCompleted: sync()
+                onModelChanged: sync()
+
+                function sync() {
+                    for (var i = 0; i < count; ++i) {
+                        if (textAt(i) === App.currentUser) {
+                            currentIndex = i
+                            return
+                        }
+                    }
+                    currentIndex = -1
+                }
+
+                Connections {
+                    target: App
+                    function onCurrentUserChanged() { userBox.sync() }
+                    function onUsersChanged() { userBox.sync() }
+                }
+
+                onActivated: App.setCurrentUser(currentText)
+            }
+
+            TextField {
+                id: newUserField
+                placeholderText: "New user..."
+                Layout.preferredWidth: 160
+            }
+
+            Button {
+                text: "Add/Switch"
+                onClicked: {
+                    if (newUserField.text.trim().length > 0) {
+                        App.setCurrentUser(newUserField.text.trim())
+                        newUserField.text = ""
+                    }
+                }
+            }
         }
     }
 
@@ -249,4 +294,89 @@ ApplicationWindow {
             }
         }
     }
+    Component {
+        id: dailyPage
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button { text: "Back"; onClicked: nav.pop() }
+                    Label { text: "Daily Tasks"; font.pixelSize: 18 }
+                    Item { Layout.fillWidth: true }
+                    Button { text: "Refresh"; onClicked: App.refreshDaily() }
+                }
+
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 10
+                    model: App.dailyTasks
+
+                    delegate: Rectangle {
+                        width: ListView.view.width
+                        height: 64
+                        radius: 12
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            Label { text: modelData.title; Layout.fillWidth: true }
+                            Label { text: "+" + modelData.xp + " XP"; opacity: 0.7 }
+                            Button {
+                                text: modelData.done ? "Done" : "Complete"
+                                enabled: !modelData.done
+                                onClicked: App.completeDailyTask(modelData.id)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Component {
+        id: leaderboardPage
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button { text: "Back"; onClicked: nav.pop() }
+                    Label { text: "Leaderboard"; font.pixelSize: 18 }
+                    Item { Layout.fillWidth: true }
+                    Button { text: "Refresh"; onClicked: App.refreshLeaderboard() }
+                }
+
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 8
+                    model: App.leaderboard
+
+                    delegate: Rectangle {
+                        width: ListView.view.width
+                        height: 56
+                        radius: 10
+                        border.width: 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            Label { text: (index+1) + "."; width: 36 }
+                            Label { text: modelData.username; Layout.fillWidth: true }
+                            Label { text: "XP " + modelData.xp; opacity: 0.7 }
+                            Label { text: "Lv " + modelData.level; opacity: 0.7 }
+                            Label { text: "Score " + Math.round(modelData.score); opacity: 0.7 }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }

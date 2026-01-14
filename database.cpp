@@ -32,113 +32,151 @@ bool Database::init() {
         return false;
     }
 
+    // IMPORTANT: do this after open()
+    {
+        QSqlQuery pragma(s_db);
+        if (!pragma.exec("PRAGMA foreign_keys = ON;")) {
+            qWarning() << "Failed to enable foreign keys:" << pragma.lastError().text();
+        }
+    }
+
     if (!createTables()) return false;
     if (!seedIfEmpty()) return false;
+    if (!seedDailyTasksIfEmpty()) return false;
+
+    int uid = ensureDefaultUser();
+    if (uid <= 0) return false;
+
+    if (!Database::initProgressForUser(uid)) return false;
+
+
     return true;
 }
+
 
 bool Database::createTables() {
     QSqlQuery q(s_db);
 
+    // ---- Users ----
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS users(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    )")) { qWarning() << q.lastError().text(); return false; }
+
+    // ---- Per-user stats ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS user_stats(
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            user_id INTEGER PRIMARY KEY,
             total_xp INTEGER NOT NULL DEFAULT 0,
             level INTEGER NOT NULL DEFAULT 1,
-            last_active TEXT
+            last_active TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id)
         )
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    )")) { qWarning() << q.lastError().text(); return false; }
 
-    if (!q.exec(R"(
-        INSERT OR IGNORE INTO user_stats(id, total_xp, level, last_active)
-        VALUES(1, 0, 1, datetime('now'))
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
-
+    // ---- Quests (global definitions) ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS quests(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             topic TEXT NOT NULL,
-            difficulty INTEGER NOT NULL DEFAULT 1,
-            unlocked INTEGER NOT NULL DEFAULT 1
+            difficulty INTEGER NOT NULL DEFAULT 1
         )
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    )")) { qWarning() << q.lastError().text(); return false; }
 
+    // ---- Quest progress (per user) ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS quest_progress(
-            quest_id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            quest_id INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'locked',   -- locked|unlocked|completed
             best_score INTEGER NOT NULL DEFAULT 0,
-            last_attempt TEXT
+            last_attempt TEXT,
+            PRIMARY KEY(user_id, quest_id),
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(quest_id) REFERENCES quests(id)
         )
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    )")) { qWarning() << q.lastError().text(); return false; }
 
+    // ---- Lessons (global, per quest) ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS lessons(
             quest_id INTEGER PRIMARY KEY,
-            body TEXT NOT NULL
+            body TEXT NOT NULL,
+            FOREIGN KEY(quest_id) REFERENCES quests(id)
         )
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    )")) { qWarning() << q.lastError().text(); return false; }
 
-
+    // ---- Questions (global, per quest) ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS questions(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             quest_id INTEGER NOT NULL,
             type TEXT NOT NULL,              -- mcq (for now)
             prompt TEXT NOT NULL,
-            choices_json TEXT NOT NULL,      -- JSON array
-            answer_json TEXT NOT NULL,       -- JSON object
-            xp_value INTEGER NOT NULL DEFAULT 10
+            choices_json TEXT NOT NULL,
+            answer_json TEXT NOT NULL,
+            xp_value INTEGER NOT NULL DEFAULT 10,
+            FOREIGN KEY(quest_id) REFERENCES quests(id)
         )
-    )")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    )")) { qWarning() << q.lastError().text(); return false; }
 
+    // ---- Attempts (per user) ----
     if (!q.exec(R"(
         CREATE TABLE IF NOT EXISTS attempts(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
             question_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL DEFAULT (datetime('now')),
             is_correct INTEGER NOT NULL,
-            user_answer_json TEXT NOT NULL
+            user_answer_json TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(question_id) REFERENCES questions(id)
         )
-    )")) {
+    )")) { qWarning() << q.lastError().text(); return false; }
+
+    if (!q.exec(R"(CREATE INDEX IF NOT EXISTS idx_attempts_user_qid ON attempts(user_id, question_id))")) {
         qWarning() << q.lastError().text();
         return false;
     }
 
-    if (!q.exec(R"(CREATE INDEX IF NOT EXISTS idx_attempts_qid ON attempts(question_id))")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    // ---- Daily tasks (global definitions) ----
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS daily_tasks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            xp_value INTEGER NOT NULL DEFAULT 10,
+            active INTEGER NOT NULL DEFAULT 1
+        )
+    )")) { qWarning() << q.lastError().text(); return false; }
+
+    // ---- Daily completions (per user, per day) ----
+    if (!q.exec(R"(
+        CREATE TABLE IF NOT EXISTS daily_completions(
+            user_id INTEGER NOT NULL,
+            task_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY(user_id, task_id, day),
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(task_id) REFERENCES daily_tasks(id)
+        )
+    )")) { qWarning() << q.lastError().text(); return false; }
+
+    q.exec("CREATE INDEX IF NOT EXISTS idx_daily_day ON daily_completions(day)");
+    q.exec("CREATE INDEX IF NOT EXISTS idx_daily_user ON daily_completions(user_id)");
 
     return true;
 }
 
+
 bool Database::seedIfEmpty() {
     QSqlQuery q(s_db);
 
-    if (!q.exec("SELECT COUNT(*) FROM quests")) {
-        qWarning() << q.lastError().text();
-        return false;
-    }
+    if (!q.exec("SELECT COUNT(*) FROM quests")) return false;
     if (!q.next()) return false;
 
     const int count = q.value(0).toInt();
@@ -148,8 +186,6 @@ bool Database::seedIfEmpty() {
         return true;
     }
 
-
-    // Seed a few starter quests
     struct Seed { const char* title; const char* topic; int diff; };
     Seed seeds[] = {
                     {"Arrays I: Basics", "arrays", 1},
@@ -158,7 +194,7 @@ bool Database::seedIfEmpty() {
                     };
 
     QSqlQuery ins(s_db);
-    ins.prepare("INSERT INTO quests(title, topic, difficulty, unlocked) VALUES(?, ?, ?, 1)");
+    ins.prepare("INSERT INTO quests(title, topic, difficulty) VALUES(?, ?, ?)");
 
     for (auto &s : seeds) {
         ins.addBindValue(QString::fromUtf8(s.title));
@@ -170,26 +206,12 @@ bool Database::seedIfEmpty() {
         }
     }
 
-    // Unlock first quest, lock others
-    QSqlQuery prog(s_db);
-    if (!prog.exec("SELECT id FROM quests ORDER BY id ASC")) return false;
-
-    bool first = true;
-    while (prog.next()) {
-        int id = prog.value(0).toInt();
-        QSqlQuery up(s_db);
-        up.prepare("INSERT OR REPLACE INTO quest_progress(quest_id, status) VALUES(?, ?)");
-        up.addBindValue(id);
-        up.addBindValue(first ? "unlocked" : "locked");
-        if (!up.exec()) return false;
-        first = false;
-    }
     if (!seedQuestionsIfEmpty()) return false;
     if (!seedLessonsIfEmpty()) return false;
+
     return true;
-
-
 }
+
 
 bool Database::seedQuestionsIfEmpty() {
     QSqlQuery q(s_db);
@@ -350,4 +372,88 @@ bool Database::seedLessonsIfEmpty() {
 
     return true;
 }
+
+int Database::ensureDefaultUser() {
+    QSqlQuery ins(s_db);
+    ins.exec("INSERT OR IGNORE INTO users(username) VALUES('LocalUser')");
+
+    QSqlQuery q(s_db);
+    q.exec("SELECT id FROM users WHERE username='LocalUser' LIMIT 1");
+    if (!q.next()) return -1;
+    int uid = q.value(0).toInt();
+
+    QSqlQuery st(s_db);
+    st.prepare("INSERT OR IGNORE INTO user_stats(user_id,total_xp,level,last_active) VALUES(?,0,1,datetime('now'))");
+    st.addBindValue(uid);
+    st.exec();
+
+    return uid;
+}
+bool Database::seedDailyTasksIfEmpty() {
+    QSqlQuery q(s_db);
+    if (!q.exec("SELECT COUNT(*) FROM daily_tasks")) return false;
+    q.next();
+    if (q.value(0).toInt() > 0) return true;
+
+    QSqlQuery ins(s_db);
+    ins.prepare("INSERT INTO daily_tasks(title, xp_value, active) VALUES(?, ?, 1)");
+
+    auto add = [&](const QString& title, int xp){
+        ins.addBindValue(title);
+        ins.addBindValue(xp);
+        return ins.exec();
+    };
+
+    if (!add("Answer 1 quiz question", 15)) return false;
+    if (!add("Complete 1 quest attempt", 20)) return false;
+    if (!add("Review a lesson", 10)) return false;
+
+    return true;
+}
+
+bool Database::initProgressForUser(int userId) {
+    QSqlDatabase db = Database::db();
+
+    QSqlQuery q(db);
+
+    // 1) Ensure a row exists for every quest (handles new quests added later)
+    q.prepare(R"(
+        INSERT OR IGNORE INTO quest_progress(user_id, quest_id, status)
+        SELECT ?, id, 'locked'
+        FROM quests
+    )");
+    q.addBindValue(userId);
+    if (!q.exec()) {
+        qWarning() << "initProgressForUser insert failed:" << q.lastError().text();
+        return false;
+    }
+
+    // 2) If user has never progressed anything, unlock the first quest
+    QSqlQuery chk(db);
+    chk.prepare("SELECT 1 FROM quest_progress WHERE user_id=? AND status!='locked' LIMIT 1");
+    chk.addBindValue(userId);
+    if (!chk.exec()) {
+        qWarning() << "initProgressForUser check failed:" << chk.lastError().text();
+        return false;
+    }
+
+    const bool hasAnyProgress = chk.next();
+    if (!hasAnyProgress) {
+        QSqlQuery up(db);
+        up.prepare(R"(
+            UPDATE quest_progress
+            SET status='unlocked'
+            WHERE user_id=?
+              AND quest_id=(SELECT MIN(id) FROM quests)
+        )");
+        up.addBindValue(userId);
+        if (!up.exec()) {
+            qWarning() << "initProgressForUser unlock failed:" << up.lastError().text();
+            return false;
+        }
+    }
+
+    return true;
+}
+
 

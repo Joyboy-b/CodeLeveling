@@ -1,6 +1,8 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QSqlDatabase>
+#include <QDebug>
 
 #include "Database.h"
 #include "AppController.h"
@@ -8,6 +10,7 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    qDebug() << "SQL drivers:" << QSqlDatabase::drivers();
 
     if (!Database::init()) {
         return -1; // fail fast if DB cannot open
